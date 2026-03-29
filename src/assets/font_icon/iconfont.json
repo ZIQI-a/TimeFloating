@@ -1,0 +1,30 @@
+{
+  "id": "5140149",
+  "name": "悬浮时钟",
+  "font_family": "iconfont",
+  "css_prefix_text": "icon-",
+  "description": "",
+  "glyphs": [
+    {
+      "icon_id": "3936092",
+      "name": "咖啡",
+      "font_class": "kafei",
+      "unicode": "e66f",
+      "unicode_decimal": 58991
+    },
+    {
+      "icon_id": "5123435",
+      "name": "番茄",
+      "font_class": "fanqie",
+      "unicode": "e628",
+      "unicode_decimal": 58920
+    },
+    {
+      "icon_id": "41916456",
+      "name": "冥想放松-ico",
+      "font_class": "mingxiangfangsong-ico",
+      "unicode": "e743",
+      "unicode_decimal": 59203
+    }
+  ]
+}

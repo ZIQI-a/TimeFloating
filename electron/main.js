@@ -1,17 +1,17 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-const fs = require('fs');
-const os = require('os');
+const { app, BrowserWindow, ipcMain } = require("electron");
+const path = require("path");
+const fs = require("fs");
+const os = require("os");
 
-// 简单的配置存储
-const configPath = path.join(os.homedir(), '.floating-clock-config.json');
+// ── 配置持久化 ────────────────────────────────────────────────────────────────
+const configPath = path.join(os.homedir(), ".floating-clock-config.json");
 
 function saveConfig(data) {
   try {
     fs.writeFileSync(configPath, JSON.stringify(data, null, 2));
     return true;
   } catch (error) {
-    console.error('保存配置失败:', error);
+    console.error("保存配置失败:", error);
     return false;
   }
 }
@@ -19,25 +19,48 @@ function saveConfig(data) {
 function loadConfig() {
   try {
     if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      return JSON.parse(fs.readFileSync(configPath, "utf8"));
     }
   } catch (error) {
-    console.error('读取配置失败:', error);
+    console.error("读取配置失败:", error);
   }
-  
-  // 默认配置
   return {
-    font: 'Geometric',
-    background: 'gradient-1',
+    font: "Rounded",
+    background: "gradient-1",
     muteSound: false,
-    alwaysOnTop: true
+    alwaysOnTop: true,
+    showDate: true,
+    hour24: true,
+    showMs: true,
   };
 }
 
+// ── 悬浮窗状态缓存（主进程做中转）────────────────────────────────────────────
+// 由主面板在"开启悬浮模式"前写入，悬浮窗启动后读取
+let floatingStateCache = {
+  mode: "clock", // 'clock' | 'stopwatch' | 'countdown'
+  settings: {}, // 同步自主面板 settings
+};
+
+// ── 窗口尺寸配置 ──────────────────────────────────────────────────────────────
+const FLOATING_SIZES = {
+  clock: { width: 280, height: 130 },
+  stopwatch: { width: 280, height: 130 },
+  countdown: { width: 280, height: 130 },
+};
+
+// ── 窗口引用 ──────────────────────────────────────────────────────────────────
 let mainWindow = null;
 let floatingWindow = null;
 
-// 创建主窗口, 并加载配置, 并设置是否置顶
+function notifyFloatingClosed() {
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send("floating-action", "close");
+    mainWindow.show();
+  }
+}
+
+// ── 创建主窗口 ────────────────────────────────────────────────────────────────
 function createMainWindow() {
   mainWindow = new BrowserWindow({
     width: 1000,
@@ -45,28 +68,28 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 650,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
     },
-    titleBarStyle: 'hiddenInset', // macOS 隐藏标题栏
-    vibrancy: 'fullscreen-ui', // macOS 毛玻璃效果
-    backgroundColor: '#00000000'
+    titleBarStyle: "hiddenInset",
+    vibrancy: "fullscreen-ui",
+    backgroundColor: "#00000000",
   });
 
-  // 开发环境加载 Vite 服务器，生产环境加载打包文件
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
   }
 
-  mainWindow.on('closed', () => {
+  mainWindow.on("closed", () => {
     mainWindow = null;
   });
 }
 
+// ── 创建悬浮窗 ────────────────────────────────────────────────────────────────
 function createFloatingWindow() {
   if (floatingWindow) {
     floatingWindow.show();
@@ -74,85 +97,129 @@ function createFloatingWindow() {
   }
 
   const config = loadConfig();
-  const alwaysOnTop = config.alwaysOnTop !== undefined ? config.alwaysOnTop : true;
+  const alwaysOnTop =
+    config.alwaysOnTop !== undefined ? config.alwaysOnTop : true;
+  const mode = floatingStateCache.mode || "clock";
+  const size = FLOATING_SIZES[mode] || FLOATING_SIZES.clock;
 
   floatingWindow = new BrowserWindow({
-    width: 280,
-    height: 80,
-    frame: false, // 无边框
-    transparent: true, // 透明背景
-    alwaysOnTop: alwaysOnTop, // 始终置顶
+    width: size.width,
+    height: size.height,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: alwaysOnTop,
     resizable: false,
-    skipTaskbar: true, // 不显示在任务栏
+    skipTaskbar: true,
+    hasShadow: false,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
-      nodeIntegration: false
-    }
+      nodeIntegration: false,
+    },
   });
 
   if (process.env.VITE_DEV_SERVER_URL) {
-    floatingWindow.loadURL(process.env.VITE_DEV_SERVER_URL + '#/floating');
+    floatingWindow.loadURL(process.env.VITE_DEV_SERVER_URL + "#/floating");
   } else {
-    floatingWindow.loadFile(path.join(__dirname, '../dist/index.html'), {
-      hash: 'floating'
+    floatingWindow.loadFile(path.join(__dirname, "../dist/index.html"), {
+      hash: "floating",
     });
   }
 
-  floatingWindow.on('closed', () => {
+  floatingWindow.on("closed", () => {
     floatingWindow = null;
+    notifyFloatingClosed();
   });
 }
 
-// IPC 通信：开启悬浮窗
-ipcMain.on('open-floating', () => {
+// ── IPC：开启悬浮窗（主面板携带状态）────────────────────────────────────────
+ipcMain.on("open-floating", (_event, floatingState) => {
+  // 缓存主面板传来的模式和设置
+  if (floatingState) {
+    floatingStateCache = { ...floatingStateCache, ...floatingState };
+  }
   if (mainWindow) {
     mainWindow.hide();
   }
   createFloatingWindow();
 });
 
-// IPC 通信：关闭悬浮窗
-ipcMain.on('close-floating', () => {
+// ── IPC：关闭悬浮窗 ───────────────────────────────────────────────────────────
+ipcMain.on("close-floating", () => {
   if (floatingWindow) {
     floatingWindow.close();
     floatingWindow = null;
-  }
-  if (mainWindow) {
-    mainWindow.show();
+  } else {
+    notifyFloatingClosed();
   }
 });
 
-// IPC 通信：设置贴顶模式
-ipcMain.on('set-always-on-top', (event, flag) => {
+// ── IPC：设置置顶 ─────────────────────────────────────────────────────────────
+ipcMain.on("set-always-on-top", (_event, flag) => {
   if (floatingWindow) {
     floatingWindow.setAlwaysOnTop(flag);
   }
 });
 
-// IPC 通信：保存设置
-ipcMain.handle('save-settings', (event, settings) => {
+// ── IPC：动态调整悬浮窗尺寸 ──────────────────────────────────────────────────
+ipcMain.on("resize-floating", (_event, width, height) => {
+  if (floatingWindow) {
+    floatingWindow.setSize(width, height);
+  }
+});
+
+// ── IPC：主面板缓存悬浮状态（开启前调用）────────────────────────────────────
+ipcMain.on("push-floating-state", (_event, state) => {
+  floatingStateCache = { ...floatingStateCache, ...state };
+  // 如果悬浮窗已开着，直接推送更新
+  if (floatingWindow && floatingWindow.webContents) {
+    floatingWindow.webContents.send("state-update", floatingStateCache);
+  }
+});
+
+// ── IPC：悬浮窗读取初始状态 ──────────────────────────────────────────────────
+ipcMain.handle("get-floating-state", () => {
+  return floatingStateCache;
+});
+
+// ── IPC：主面板推送计时器实时数据 → 转发给悬浮窗 ────────────────────────────
+ipcMain.on("push-timer-tick", (_event, data) => {
+  if (floatingWindow && floatingWindow.webContents) {
+    floatingWindow.webContents.send("timer-tick", data);
+  }
+});
+
+// ── IPC：悬浮窗操作（开始/暂停/重置）→ 转发给主面板 ────────────────────────
+ipcMain.on("floating-action", (_event, action) => {
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send("floating-action", action);
+  }
+});
+
+// ── IPC：保存配置 ─────────────────────────────────────────────────────────────
+ipcMain.handle("save-settings", (_event, settings) => {
   const success = saveConfig(settings);
   return { success };
 });
 
-// IPC 通信：读取设置
-ipcMain.handle('get-settings', () => {
+// ── IPC：读取配置 ─────────────────────────────────────────────────────────────
+ipcMain.handle("get-settings", () => {
   return loadConfig();
 });
 
+// ── 应用生命周期 ──────────────────────────────────────────────────────────────
 app.whenReady().then(() => {
   createMainWindow();
 
-  app.on('activate', () => {
+  app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
     }
   });
 });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+app.on("window-all-closed", () => {
+  if (process.platform !== "darwin") {
     app.quit();
   }
 });
