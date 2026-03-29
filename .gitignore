@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+/src/assets/font_icon/demo.css
+/src/assets/font_icon/demo_index.html
+/src/assets/font_icon/iconfont.css
