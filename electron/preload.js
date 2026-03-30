@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-// 暴露安全的 API 给渲染进程
+// 预加载层只暴露白名单 API。
+// 渲染进程不直接接触 ipcRenderer，避免把 Electron 能力无约束地下放到页面里。
 contextBridge.exposeInMainWorld("electronAPI", {
   // 窗口控制
   openFloating: (floatingState) =>
@@ -14,8 +15,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveSettings: (settings) => ipcRenderer.invoke("save-settings", settings),
   getSettings: () => ipcRenderer.invoke("get-settings"),
 
-  // 悬浮窗状态同步：主面板 → 悬浮窗
-  // 主面板调用此方法把最新状态写入 main 进程缓存
+  // 主面板完整状态快照：既写入主进程缓存，也可转发给已打开的悬浮窗
   pushFloatingState: (state) => ipcRenderer.send("push-floating-state", state),
 
   // 悬浮窗读取主面板传来的初始状态
@@ -29,12 +29,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("state-update", (_event, state) => callback(state));
   },
 
-  // 监听主面板发来的计时器实时数据（悬浮窗订阅）
+  // 高频实时 tick：只负责同步正在变化的显示数据
   onTimerTick: (callback) => {
     ipcRenderer.on("timer-tick", (_event, data) => callback(data));
   },
 
-  // 主面板推送计时器实时数据给悬浮窗
+  // 主面板主动推送高频 tick
   pushTimerTick: (data) => ipcRenderer.send("push-timer-tick", data),
 
   // 悬浮窗操作 → 主面板（主进程转发过来的指令）

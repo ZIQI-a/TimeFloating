@@ -170,6 +170,8 @@ ipcMain.on("resize-floating", (_event, width, height) => {
 
 // ── IPC：主面板缓存悬浮状态（开启前调用）────────────────────────────────────
 ipcMain.on("push-floating-state", (_event, state) => {
+  // 主进程只做中转和缓存，不在这里派生业务状态。
+  // 这样悬浮窗重开时可以直接取到最近一次主面板快照。
   floatingStateCache = { ...floatingStateCache, ...state };
   // 如果悬浮窗已开着，直接推送更新
   if (floatingWindow && floatingWindow.webContents) {
@@ -184,6 +186,8 @@ ipcMain.handle("get-floating-state", () => {
 
 // ── IPC：主面板推送计时器实时数据 → 转发给悬浮窗 ────────────────────────────
 ipcMain.on("push-timer-tick", (_event, data) => {
+  // tick 不入缓存，只做瞬时转发。
+  // 计时器的长期恢复依赖 floatingStateCache，而不是最后一帧 tick。
   if (floatingWindow && floatingWindow.webContents) {
     floatingWindow.webContents.send("timer-tick", data);
   }
@@ -191,6 +195,8 @@ ipcMain.on("push-timer-tick", (_event, data) => {
 
 // ── IPC：悬浮窗操作（开始/暂停/重置）→ 转发给主面板 ────────────────────────
 ipcMain.on("floating-action", (_event, action) => {
+  // 悬浮窗不直接改主进程缓存，只上报动作给主面板处理。
+  // 这样业务逻辑仍集中在主面板，避免多处同时维护计时状态。
   if (mainWindow && mainWindow.webContents) {
     mainWindow.webContents.send("floating-action", action);
   }

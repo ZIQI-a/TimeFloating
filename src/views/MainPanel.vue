@@ -746,28 +746,62 @@ export default {
         async openFloatingMode() {
             await this.saveSettings();
             if (window.electronAPI) {
-                // JSON 往返剥离 Vue Proxy，确保所有字段均可被 IPC 结构化克隆
-                const state = JSON.parse(
-                    JSON.stringify({
-                        mode: this.activeTab,
-                        settings: this.settings,
-                        stopwatchTime: this.stopwatchTime,
-                        stopwatchRunning: this.stopwatchRunning,
-                        countdownHours: this.countdownHours,
-                        countdownMinutes: this.countdownMinutes,
-                        countdownSeconds: this.countdownSeconds,
-                        countdownInitHours: this.countdownInitHours,
-                        countdownInitMinutes: this.countdownInitMinutes,
-                        countdownInitSeconds: this.countdownInitSeconds,
-                        countdownRunning: this.countdownRunning,
-                        countdownFinished: this.countdownFinished,
-                        countdownEnding: this.countdownEnding,
-                    }),
-                );
+                // 打开悬浮窗时先发一份完整快照，确保它拿到一套可直接渲染的初始状态。
+                const state = this.getFloatingStatePayload();
                 window.electronAPI.openFloating(state);
                 // 开始推送实时 tick 给悬浮窗
                 this.startFloatingTick();
             }
+        },
+
+        getFloatingStatePayload() {
+            // 这是“低频完整快照”，用于初始化悬浮窗，或在关键动作后整包校正状态。
+            return JSON.parse(
+                JSON.stringify({
+                    mode: this.activeTab,
+                    settings: this.settings,
+                    stopwatchTime: this.stopwatchTime,
+                    stopwatchRunning: this.stopwatchRunning,
+                    countdownHours: this.countdownHours,
+                    countdownMinutes: this.countdownMinutes,
+                    countdownSeconds: this.countdownSeconds,
+                    countdownInitHours: this.countdownInitHours,
+                    countdownInitMinutes: this.countdownInitMinutes,
+                    countdownInitSeconds: this.countdownInitSeconds,
+                    countdownRunning: this.countdownRunning,
+                    countdownFinished: this.countdownFinished,
+                    countdownEnding: this.countdownEnding,
+                }),
+            );
+        },
+
+        getFloatingTickPayload() {
+            // 这是“高频增量数据”，只带悬浮窗实时显示所需的字段。
+            return JSON.parse(
+                JSON.stringify({
+                    mode: this.activeTab,
+                    stopwatchTime: this.stopwatchTime,
+                    stopwatchRunning: this.stopwatchRunning,
+                    stopwatchShowMs: this.settings.showMs,
+                    countdownHours: this.countdownHours,
+                    countdownMinutes: this.countdownMinutes,
+                    countdownSeconds: this.countdownSeconds,
+                    countdownMs: this.countdownMs,
+                    countdownShowMs: this.settings.countdownShowMs,
+                    countdownRunning: this.countdownRunning,
+                    countdownFinished: this.countdownFinished,
+                    countdownEnding: this.countdownEnding,
+                    currentTime: this.currentTime,
+                    clockShowMs: this.settings.clockShowMs,
+                }),
+            );
+        },
+
+        pushFloatingSnapshot() {
+            if (!window.electronAPI) return;
+            // 动作刚发生时立即发一份快照 + 当前 tick，避免悬浮窗再等下一轮 80ms 定时推送。
+            window.electronAPI.pushFloatingState(this.getFloatingStatePayload());
+            window.electronAPI.pushTimerTick(this.getFloatingTickPayload());
         },
 
         // 开始向悬浮窗推送实时计时数据
@@ -775,26 +809,8 @@ export default {
             this.stopFloatingTick();
             this._floatingTickInterval = setInterval(() => {
                 if (!window.electronAPI) return;
-                // JSON 往返确保纯对象，避免 Proxy 序列化失败
-                const tick = JSON.parse(
-                    JSON.stringify({
-                        mode: this.activeTab,
-                        stopwatchTime: this.stopwatchTime,
-                        stopwatchRunning: this.stopwatchRunning,
-                        stopwatchShowMs: this.settings.showMs,
-                        countdownHours: this.countdownHours,
-                        countdownMinutes: this.countdownMinutes,
-                        countdownSeconds: this.countdownSeconds,
-                        countdownMs: this.countdownMs,
-                        countdownShowMs: this.settings.countdownShowMs,
-                        countdownRunning: this.countdownRunning,
-                        countdownFinished: this.countdownFinished,
-                        countdownEnding: this.countdownEnding,
-                        currentTime: this.currentTime,
-                        clockShowMs: this.settings.clockShowMs,
-                    }),
-                );
-                window.electronAPI.pushTimerTick(tick);
+                // 高频通道只做实时同步，不承担完整状态恢复职责。
+                window.electronAPI.pushTimerTick(this.getFloatingTickPayload());
             }, 80);
         },
 
@@ -811,11 +827,17 @@ export default {
             if (typeof window.electronAPI.onFloatingAction !== "function")
                 return;
             window.electronAPI.onFloatingAction((action) => {
+                // 主面板仍然是计时状态的唯一来源。
+                // 悬浮窗只负责上报动作，不直接决定最终业务状态。
                 if (action === "stopwatch-toggle") this.toggleStopwatch();
                 else if (action === "stopwatch-reset") this.resetStopwatch();
                 else if (action === "countdown-toggle") this.toggleCountdown();
                 else if (action === "countdown-reset") this.resetCountdown();
                 else if (action === "close") this.stopFloatingTick();
+
+                if (action !== "close") {
+                    this.pushFloatingSnapshot();
+                }
             });
         },
 
