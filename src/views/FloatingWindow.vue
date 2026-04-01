@@ -1,11 +1,20 @@
 <template>
-  <div class="floating-root">
+  <div
+    class="floating-root"
+    @mousemove="revealControls"
+    @mouseenter="revealControls"
+    @mouseleave="scheduleHideControls"
+  >
     <div class="capsule">
       <!-- 顶部拖拽指示条 -->
       <div class="drag-bar"></div>
 
       <!-- 顶部操作栏：关闭 + 展开 -->
-      <div class="top-bar">
+      <div
+        class="top-bar"
+        :class="{ 'top-bar--visible': showControls }"
+        @mouseenter="revealControls"
+      >
         <button class="icon-btn close-btn" @click="handleClose" title="关闭">
           <svg
             viewBox="0 0 24 24"
@@ -51,7 +60,11 @@
         <span class="time-display time-display--timer" :class="fontClass">{{
           formattedStopwatch
         }}</span>
-        <div class="timer-actions">
+        <div
+          class="timer-actions"
+          :class="{ 'timer-actions--visible': showControls }"
+          @mouseenter="revealControls"
+        >
           <!-- 重置 -->
           <button
             class="icon-btn action-btn"
@@ -105,7 +118,11 @@
           ]"
           >{{ formattedCountdown }}</span
         >
-        <div class="timer-actions">
+        <div
+          class="timer-actions"
+          :class="{ 'timer-actions--visible': showControls }"
+          @mouseenter="revealControls"
+        >
           <!-- 重置 -->
           <button
             class="icon-btn action-btn"
@@ -187,8 +204,13 @@ export default {
       countdownRunning: false,
       countdownFinished: false,
       countdownEnding: false,
-      _cdSecStart: undefined, // 当前秒段起始时间戳
-      _cdMs: 0, // 当前秒内已过毫秒数（RAF驱动）
+      countdownInitHours: 0,
+      countdownInitMinutes: 0,
+      countdownInitSeconds: 0,
+      _cdEndAt: undefined, // 倒计时结束时间戳，悬浮窗据此本地逐帧推导剩余时间
+      _cdMs: 0,
+      showControls: false,
+      _hideControlsTimer: null,
 
       // RAF 驱动
       _rafHandle: null,
@@ -230,7 +252,7 @@ export default {
         seconds: this.countdownSeconds,
         ms: this._cdMs,
         showMs: this.settings.countdownShowMs,
-        forceHours: this.countdownHours > 0,
+        forceHours: this.countdownInitHours > 0 || this.countdownHours > 0,
       });
     },
   },
@@ -246,6 +268,7 @@ export default {
   beforeUnmount() {
     this.stopClock();
     this.stopRaf();
+    this.clearHideControlsTimer();
     if (window.electronAPI) {
       window.electronAPI.removeTimerTickListener();
       window.electronAPI.removeStateUpdateListener();
@@ -294,16 +317,22 @@ export default {
         this.countdownMinutes = state.countdownMinutes;
       if (state.countdownSeconds !== undefined)
         this.countdownSeconds = state.countdownSeconds;
+      if (state.countdownInitHours !== undefined)
+        this.countdownInitHours = state.countdownInitHours;
+      if (state.countdownInitMinutes !== undefined)
+        this.countdownInitMinutes = state.countdownInitMinutes;
+      if (state.countdownInitSeconds !== undefined)
+        this.countdownInitSeconds = state.countdownInitSeconds;
+
+      if (state.countdownRemainingMs !== undefined) {
+        this.syncCountdownFromRemainingMs(state.countdownRemainingMs);
+      }
+
       if (state.countdownRunning !== undefined) {
-        const wasRunning = this.countdownRunning;
         this.countdownRunning = state.countdownRunning;
-        if (state.countdownRunning && !wasRunning) {
-          this._cdSecStart = Date.now();
-          this._cdMs = 0;
-        } else if (!state.countdownRunning) {
-          this._cdSecStart = undefined;
-          this._cdMs = 0;
-        }
+        this._cdEndAt = state.countdownRunning
+          ? Date.now() + this.getCurrentCountdownRemainingMs()
+          : undefined;
       }
       if (state.countdownFinished !== undefined)
         this.countdownFinished = state.countdownFinished;
@@ -325,9 +354,14 @@ export default {
           this.stopwatchTime = now - this._swStart;
         }
 
-        // 倒计时毫秒：运行中按真实经过时间计算（0→999方向）
-        if (this.countdownRunning && this._cdSecStart !== undefined) {
-          this._cdMs = (now - this._cdSecStart) % 1000;
+        // 倒计时按统一的结束时间戳推导，避免悬浮窗本地秒数卡住。
+        if (this.countdownRunning && this._cdEndAt !== undefined) {
+          const remainingMs = Math.max(0, this._cdEndAt - now);
+          this.syncCountdownFromRemainingMs(remainingMs);
+
+          if (remainingMs <= 0) {
+            this.finishCountdown();
+          }
         }
 
         this._rafHandle = requestAnimationFrame(loop);
@@ -413,37 +447,21 @@ export default {
           // 运行中：RAF 自己计算，不接受 tick 覆盖 stopwatchTime
         }
 
-        // 倒计时：只同步秒级状态变化
-        const cdSecsChanged =
-          data.countdownHours !== undefined &&
-          (data.countdownHours !== this.countdownHours ||
-            data.countdownMinutes !== this.countdownMinutes ||
-            data.countdownSeconds !== this.countdownSeconds);
-
         if (data.countdownHours !== undefined)
           this.countdownHours = data.countdownHours;
         if (data.countdownMinutes !== undefined)
           this.countdownMinutes = data.countdownMinutes;
         if (data.countdownSeconds !== undefined)
           this.countdownSeconds = data.countdownSeconds;
-
-        if (data.countdownRunning !== undefined) {
-          const wasRunning = this.countdownRunning;
-          this.countdownRunning = data.countdownRunning;
-          if (!wasRunning && data.countdownRunning) {
-            // 刚开始
-            this._cdSecStart = Date.now();
-            this._cdMs = 0;
-          } else if (!data.countdownRunning) {
-            this._cdSecStart = undefined;
-            this._cdMs = 0;
-          }
+        if (data.countdownRemainingMs !== undefined) {
+          this.syncCountdownFromRemainingMs(data.countdownRemainingMs);
         }
 
-        // 每次秒数跳变时重置毫秒段
-        if (cdSecsChanged && this.countdownRunning) {
-          this._cdSecStart = Date.now();
-          this._cdMs = 0;
+        if (data.countdownRunning !== undefined) {
+          this.countdownRunning = data.countdownRunning;
+          this._cdEndAt = data.countdownRunning
+            ? Date.now() + this.getCurrentCountdownRemainingMs()
+            : undefined;
         }
 
         if (data.countdownFinished !== undefined)
@@ -499,9 +517,11 @@ export default {
 
       if (action === "countdown-toggle") {
         if (this.countdownRunning) {
+          if (this._cdEndAt !== undefined) {
+            this.syncCountdownFromRemainingMs(Math.max(0, this._cdEndAt - now));
+          }
           this.countdownRunning = false;
-          this._cdSecStart = undefined;
-          this._cdMs = 0;
+          this._cdEndAt = undefined;
           return;
         }
 
@@ -515,8 +535,7 @@ export default {
         }
 
         this.countdownRunning = true;
-        this._cdSecStart = now;
-        this._cdMs = 0;
+        this._cdEndAt = now + this.getCurrentCountdownRemainingMs();
         return;
       }
 
@@ -524,8 +543,68 @@ export default {
         this.countdownRunning = false;
         this.countdownFinished = false;
         this.countdownEnding = false;
-        this._cdSecStart = undefined;
+        this._cdEndAt = undefined;
         this._cdMs = 0;
+        this.countdownHours = this.countdownInitHours;
+        this.countdownMinutes = this.countdownInitMinutes;
+        this.countdownSeconds = this.countdownInitSeconds;
+      }
+    },
+
+    // 统一从剩余毫秒推导倒计时展示，确保秒数与毫秒同源。
+    syncCountdownFromRemainingMs(remainingMs) {
+      const normalizedMs = Math.max(0, remainingMs - 1);
+      const totalSeconds = Math.floor(normalizedMs / 1000);
+
+      this.countdownHours = Math.floor(totalSeconds / 3600);
+      this.countdownMinutes = Math.floor((totalSeconds % 3600) / 60);
+      this.countdownSeconds = totalSeconds % 60;
+      this._cdMs = normalizedMs % 1000;
+      this.countdownEnding = totalSeconds < 10 && remainingMs > 0;
+    },
+
+    // 当前展示值还原为剩余毫秒，供本地乐观更新和恢复计时使用。
+    getCurrentCountdownRemainingMs() {
+      return Math.max(
+        0,
+        (this.countdownHours * 3600 +
+          this.countdownMinutes * 60 +
+          this.countdownSeconds) *
+          1000 +
+          this._cdMs,
+      );
+    },
+
+    finishCountdown() {
+      this._cdEndAt = undefined;
+      this.countdownRunning = false;
+      this.countdownFinished = true;
+      this.countdownEnding = false;
+      this.countdownHours = 0;
+      this.countdownMinutes = 0;
+      this.countdownSeconds = 0;
+      this._cdMs = 0;
+    },
+
+    // 鼠标在悬浮窗内移动时保持控件可见，避免拖拽区导致 hover 频繁丢失。
+    revealControls() {
+      this.clearHideControlsTimer();
+      this.showControls = true;
+    },
+
+    // 延迟隐藏给鼠标从内容区移动到按钮区留一点余量。
+    scheduleHideControls() {
+      this.clearHideControlsTimer();
+      this._hideControlsTimer = setTimeout(() => {
+        this.showControls = false;
+        this._hideControlsTimer = null;
+      }, 180);
+    },
+
+    clearHideControlsTimer() {
+      if (this._hideControlsTimer) {
+        clearTimeout(this._hideControlsTimer);
+        this._hideControlsTimer = null;
       }
     },
 
@@ -549,20 +628,17 @@ export default {
   align-items: center;
   justify-content: center;
   background: transparent;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 
 /* ── 胶囊主体：竖向布局，三种模式统一尺寸 ── */
 .capsule {
   position: relative;
-  /* 竖向：时间居上，按钮居下 */
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0;
 
-  /* 三种模式统一宽高 */
   width: 280px;
   height: 120px;
 
@@ -577,8 +653,10 @@ export default {
     inset 0 1px 0 rgba(255, 255, 255, 0.65);
 
   border-radius: 32px;
-  padding: 14px 18px 12px;
+  padding: 10px 14px;
   box-sizing: border-box;
+  overflow: hidden;
+  -webkit-app-region: no-drag;
 }
 
 /* ── 顶部拖拽指示条 ── */
@@ -592,16 +670,33 @@ export default {
   border-radius: 3px;
   background: rgba(0, 0, 0, 0.12);
   pointer-events: none;
+  -webkit-app-region: drag;
+  z-index: 999;
 }
 
 /* ── 顶部操作栏（关闭 + 展开，两端对齐）── */
 .top-bar {
-  width: 100%;
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  right: 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
   -webkit-app-region: no-drag;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.top-bar--visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
 }
 
 /* ── 公共图标按钮 ── */
@@ -639,14 +734,16 @@ export default {
 /* ── 关闭 & 展开按钮尺寸 ── */
 .close-btn,
 .expand-btn {
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
+  background: rgba(255, 255, 255, 0.52);
+  box-shadow: 0 6px 18px rgba(19, 36, 52, 0.08);
 }
 
 .close-btn svg,
 .expand-btn svg {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
 }
 
 .close-btn:hover {
@@ -667,35 +764,39 @@ export default {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  -webkit-app-region: drag;
+  gap: 0;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  -webkit-app-region: no-drag;
 }
 
 .content--clock {
-  /* 时钟无按钮，时间垂直居中 */
   justify-content: center;
+  -webkit-app-region: drag;
 }
 
 .content--timer {
   justify-content: center;
+  padding-bottom: 8px;
+  -webkit-app-region: drag;
 }
 
 /* ── 时间数字 ── */
 .time-display {
-  font-size: 2.2rem;
+  font-size: 3.2rem;
   font-weight: 700;
   color: #1a2a3a;
-  letter-spacing: -1.5px;
-  line-height: 1;
+  letter-spacing: -2.8px;
+  line-height: 0.92;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   transition: color 0.3s ease;
-  -webkit-app-region: drag;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.22);
 }
 
 .time-display--timer {
-  font-size: 2rem;
-  letter-spacing: -1px;
+  font-size: 2.92rem;
+  letter-spacing: -2.2px;
 }
 
 /* 最后 10 秒闪烁 */
@@ -721,18 +822,36 @@ export default {
 
 /* ── 计时操作按钮组（时间正下方，横排居中）── */
 .timer-actions {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translate(-50%, 8px);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   -webkit-app-region: no-drag;
+  opacity: 0;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s ease;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.timer-actions--visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  pointer-events: auto;
 }
 
 /* 操作按钮圆形 */
 .action-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
 
 .action-btn svg {
@@ -743,8 +862,9 @@ export default {
 /* 重置按钮 */
 .action-btn:not(.action-btn--primary) {
   color: rgba(44, 62, 80, 0.4);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 8px 22px rgba(16, 30, 44, 0.08);
 }
 
 .action-btn:not(.action-btn--primary):hover {
@@ -755,9 +875,10 @@ export default {
 
 /* 开始按钮（蓝色）*/
 .action-btn--primary {
-  background: rgba(79, 172, 254, 0.2);
+  background: rgba(79, 172, 254, 0.16);
   color: #2176ae;
-  border: 1px solid rgba(79, 172, 254, 0.3);
+  border: 1px solid rgba(79, 172, 254, 0.24);
+  box-shadow: 0 10px 24px rgba(79, 172, 254, 0.18);
 }
 
 .action-btn--primary:hover {
@@ -768,9 +889,10 @@ export default {
 
 /* 暂停状态：橙色 */
 .action-btn--pause {
-  background: rgba(247, 151, 30, 0.18);
+  background: rgba(247, 151, 30, 0.14);
   color: #c8790f;
-  border: 1px solid rgba(247, 151, 30, 0.3);
+  border: 1px solid rgba(247, 151, 30, 0.24);
+  box-shadow: 0 10px 24px rgba(247, 151, 30, 0.14);
 }
 
 .action-btn--pause:hover {

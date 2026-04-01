@@ -320,7 +320,7 @@
             <span
               class="option-label"
               style="font-size: 0.85rem; color: #444444"
-              >始终置顶</span
+              >悬浮窗始终置顶</span
             >
             <label class="toggle-switch">
               <input
@@ -729,6 +729,8 @@ export default {
           countdownRunning: this.countdownRunning,
           countdownFinished: this.countdownFinished,
           countdownEnding: this.countdownEnding,
+          // 显式同步剩余时间基准，避免悬浮窗只拿到“当前秒数”却无法正确推进。
+          countdownRemainingMs: this.getCountdownRemainingMs(),
         }),
       );
     },
@@ -744,14 +746,35 @@ export default {
           countdownHours: this.countdownHours,
           countdownMinutes: this.countdownMinutes,
           countdownSeconds: this.countdownSeconds,
+          countdownInitHours: this.countdownInitHours,
+          countdownInitMinutes: this.countdownInitMinutes,
+          countdownInitSeconds: this.countdownInitSeconds,
           countdownMs: this.countdownMs,
           countdownShowMs: this.settings.countdownShowMs,
           countdownRunning: this.countdownRunning,
           countdownFinished: this.countdownFinished,
           countdownEnding: this.countdownEnding,
+          // 高频通道同步剩余毫秒，悬浮窗据此在本地逐帧推导显示。
+          countdownRemainingMs: this.getCountdownRemainingMs(),
           currentTime: this.currentTime,
           clockShowMs: this.settings.clockShowMs,
         }),
+      );
+    },
+
+    // 统一导出倒计时剩余毫秒，保证主面板和悬浮窗基于同一时间基准。
+    getCountdownRemainingMs() {
+      if (this.countdownRunning && this._cdEndAt !== undefined) {
+        return Math.max(0, this._cdEndAt - Date.now());
+      }
+
+      return Math.max(
+        0,
+        (this.countdownHours * 3600 +
+          this.countdownMinutes * 60 +
+          this.countdownSeconds) *
+          1000 +
+          this.countdownMs,
       );
     },
 
@@ -797,7 +820,7 @@ export default {
         }
       });
     },
-
+    // 悬浮窗顶置设置变更时立即生效
     toggleAlwaysOnTop() {
       this.saveSettings();
       if (window.electronAPI)
@@ -1210,6 +1233,7 @@ export default {
     box-shadow 0.2s,
     border-color 0.2s;
   -moz-appearance: textfield;
+  appearance: none;
   font-weight: 500;
 }
 
