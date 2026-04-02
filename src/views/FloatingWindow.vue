@@ -1,33 +1,54 @@
 <template>
   <div
     class="floating-root"
-    @mousemove="revealControls"
-    @mouseenter="revealControls"
+    @mousemove="onRootMouseMove"
+    @mouseenter="onRootMouseMove"
     @mouseleave="scheduleHideControls"
   >
-    <div class="capsule">
+    <div class="capsule" @mousedown="onDragStart">
       <!-- 顶部拖拽指示条 -->
       <div class="drag-bar"></div>
 
-      <!-- 顶部操作栏：关闭 + 展开 -->
+      <!-- 顶部操作栏：锁定 + 展开 -->
       <div
         class="top-bar"
-        :class="{ 'top-bar--visible': showControls }"
+        :class="{ 'top-bar--visible': showControls || locked }"
         @mouseenter="revealControls"
       >
-        <button class="icon-btn close-btn" @click="handleClose" title="关闭">
+        <button
+          ref="lockBtn"
+          class="icon-btn lock-btn"
+          :class="{ 'lock-btn--active': locked }"
+          @click="handleLock"
+          :title="locked ? '解锁' : '锁定'"
+        >
           <svg
+            v-if="!locked"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            stroke-width="2.5"
+            stroke-width="2.2"
             stroke-linecap="round"
+            stroke-linejoin="round"
           >
-            <line x1="6" y1="6" x2="18" y2="18" />
-            <line x1="18" y1="6" x2="6" y2="18" />
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 9.9-1" />
+          </svg>
+          <svg
+            v-else
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
         </button>
         <button
+          v-if="!locked"
           class="icon-btn expand-btn"
           @click="handleExpand"
           title="返回主面板"
@@ -62,7 +83,7 @@
         }}</span>
         <div
           class="timer-actions"
-          :class="{ 'timer-actions--visible': showControls }"
+          :class="{ 'timer-actions--visible': showControls && !locked }"
           @mouseenter="revealControls"
         >
           <!-- 重置 -->
@@ -120,7 +141,7 @@
         >
         <div
           class="timer-actions"
-          :class="{ 'timer-actions--visible': showControls }"
+          :class="{ 'timer-actions--visible': showControls && !locked }"
           @mouseenter="revealControls"
         >
           <!-- 重置 -->
@@ -210,6 +231,7 @@ export default {
       _cdEndAt: undefined, // 倒计时结束时间戳，悬浮窗据此本地逐帧推导剩余时间
       _cdMs: 0,
       showControls: false,
+      locked: false,
       _hideControlsTimer: null,
 
       // RAF 驱动
@@ -553,7 +575,7 @@ export default {
 
     // 统一从剩余毫秒推导倒计时展示，确保秒数与毫秒同源。
     syncCountdownFromRemainingMs(remainingMs) {
-      const normalizedMs = Math.max(0, remainingMs - 1);
+      const normalizedMs = Math.max(0, remainingMs);
       const totalSeconds = Math.floor(normalizedMs / 1000);
 
       this.countdownHours = Math.floor(totalSeconds / 3600);
@@ -586,14 +608,39 @@ export default {
       this._cdMs = 0;
     },
 
+    onRootMouseMove(e) {
+      if (this.locked) {
+        // 锁定模式下：鼠标在锁定按钮上时恢复可点击，其他区域穿透
+        const btn = this.$refs.lockBtn;
+        if (btn) {
+          const rect = btn.getBoundingClientRect();
+          const over =
+            e.clientX >= rect.left &&
+            e.clientX <= rect.right &&
+            e.clientY >= rect.top &&
+            e.clientY <= rect.bottom;
+          if (window.electronAPI)
+            window.electronAPI.setIgnoreMouseEvents(!over);
+        }
+        return;
+      }
+      this.revealControls();
+    },
+
     // 鼠标在悬浮窗内移动时保持控件可见，避免拖拽区导致 hover 频繁丢失。
     revealControls() {
+      if (this.locked) return;
       this.clearHideControlsTimer();
       this.showControls = true;
     },
 
     // 延迟隐藏给鼠标从内容区移动到按钮区留一点余量。
     scheduleHideControls() {
+      if (this.locked) {
+        // 鼠标离开窗口，恢复完全穿透
+        if (window.electronAPI) window.electronAPI.setIgnoreMouseEvents(true);
+        return;
+      }
       this.clearHideControlsTimer();
       this._hideControlsTimer = setTimeout(() => {
         this.showControls = false;
@@ -605,6 +652,30 @@ export default {
       if (this._hideControlsTimer) {
         clearTimeout(this._hideControlsTimer);
         this._hideControlsTimer = null;
+      }
+    },
+
+    // ── 手动拖拽（替代 -webkit-app-region: drag）──────────────
+    onDragStart(e) {
+      // 锁定模式下不拖拽
+      if (this.locked) return;
+      // 如果点击的是按钮或其子元素，不启动拖拽
+      if (e.target.closest("button")) return;
+
+      if (window.electronAPI) window.electronAPI.startDrag();
+
+      const onUp = () => {
+        if (window.electronAPI) window.electronAPI.stopDrag();
+        document.removeEventListener("mouseup", onUp);
+      };
+      document.addEventListener("mouseup", onUp);
+    },
+    handleLock() {
+      this.locked = !this.locked;
+      this.showControls = false;
+      this.clearHideControlsTimer();
+      if (window.electronAPI) {
+        window.electronAPI.setIgnoreMouseEvents(this.locked);
       }
     },
 
@@ -646,10 +717,10 @@ export default {
   background: rgba(255, 255, 255, 0.52);
   backdrop-filter: blur(36px) saturate(200%);
   -webkit-backdrop-filter: blur(36px) saturate(200%);
-  border: 1px solid rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.2);
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.13),
-    0 3px 10px rgba(0, 0, 0, 0.07),
+    0 3px 4px rgba(0, 0, 0, 0.13),
+    0 3px 4px rgba(0, 0, 0, 0.07),
     inset 0 1px 0 rgba(255, 255, 255, 0.65);
 
   border-radius: 32px;
@@ -670,7 +741,6 @@ export default {
   border-radius: 3px;
   background: rgba(0, 0, 0, 0.12);
   pointer-events: none;
-  -webkit-app-region: drag;
   z-index: 999;
 }
 
@@ -731,8 +801,8 @@ export default {
   display: block;
 }
 
-/* ── 关闭 & 展开按钮尺寸 ── */
-.close-btn,
+/* ── 锁定 & 展开按钮尺寸 ── */
+.lock-btn,
 .expand-btn {
   width: 26px;
   height: 26px;
@@ -740,15 +810,21 @@ export default {
   box-shadow: 0 6px 18px rgba(19, 36, 52, 0.08);
 }
 
-.close-btn svg,
+.lock-btn svg,
 .expand-btn svg {
   width: 12px;
   height: 12px;
 }
 
-.close-btn:hover {
-  background: rgba(231, 76, 60, 0.12);
-  color: #e74c3c;
+.lock-btn:hover {
+  background: rgba(247, 151, 30, 0.12);
+  color: #c8790f;
+}
+
+.lock-btn--active {
+  background: rgba(247, 151, 30, 0.18) !important;
+  color: #c8790f !important;
+  box-shadow: 0 6px 18px rgba(247, 151, 30, 0.18);
 }
 
 .expand-btn:hover {
@@ -772,19 +848,18 @@ export default {
 
 .content--clock {
   justify-content: center;
-  -webkit-app-region: drag;
 }
 
 .content--timer {
   justify-content: center;
   padding-bottom: 8px;
-  -webkit-app-region: drag;
 }
 
 /* ── 时间数字 ── */
 .time-display {
   font-size: 3.2rem;
   font-weight: 700;
+  user-select: none;
   color: #1a2a3a;
   letter-spacing: -2.8px;
   line-height: 0.92;

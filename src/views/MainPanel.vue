@@ -313,9 +313,53 @@
 
         <!-- 悬浮模式 -->
         <div class="floating-controls">
-          <button class="floating-btn" @click="openFloatingMode">
-            🚀 开启悬浮模式
-          </button>
+          <div class="floating-btn-row">
+            <button class="floating-btn" @click="openFloatingMode">
+              <svg class="icon" aria-hidden="true">
+                <use xlink:href="#icon-xuanfuwu"></use>
+              </svg>
+              开启悬浮模式
+            </button>
+            <!-- 悬浮窗设置按钮 -->
+            <div class="float-settings-wrap" ref="floatSettingsRef">
+              <button
+                class="float-settings-btn"
+                :class="{ active: showFloatingSettings }"
+                @click.stop="showFloatingSettings = !showFloatingSettings"
+                title="悬浮窗设置"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="3"/>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+              </button>
+              <!-- 气泡设置面板 -->
+              <transition name="popover">
+                <div v-if="showFloatingSettings" class="float-settings-popover" @click.stop>
+                  <div class="popover-arrow"></div>
+                  <div class="popover-title">悬浮窗设置</div>
+                  <div class="popover-row">
+                    <span class="popover-label">不透明度</span>
+                    <span class="popover-value">{{ Math.round(settings.floatingOpacity * 100) }}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    class="opacity-slider"
+                    min="10"
+                    max="100"
+                    step="1"
+                    :value="Math.round(settings.floatingOpacity * 100)"
+                    :style="{ '--pct': Math.round(settings.floatingOpacity * 100) }"
+                    @input="onOpacityChange"
+                  />
+                  <div class="popover-hints">
+                    <span>更透明</span>
+                    <span>不透明</span>
+                  </div>
+                </div>
+              </transition>
+            </div>
+          </div>
           <div class="option-row" style="margin-top: 0.75rem">
             <span
               class="option-label"
@@ -380,6 +424,9 @@ export default {
       _rafHandle: null,
       _msTick: 0,
 
+      // 悬浮窗设置气泡
+      showFloatingSettings: false,
+
       // 设置
       settings: {
         font: "Geometric",
@@ -390,6 +437,7 @@ export default {
         showMs: true,
         clockShowMs: false,
         countdownShowMs: false,
+        floatingOpacity: 1,
         // 秒表内部精确起始时间戳（不存入持久化，仅运行时用）
       },
 
@@ -516,6 +564,8 @@ export default {
     this.startRaf();
     this.loadSettings();
     this.listenFloatingActions();
+    // 点击外部关闭气泡
+    document.addEventListener("click", this.onDocClick);
   },
 
   beforeUnmount() {
@@ -523,6 +573,7 @@ export default {
     clearInterval(this.stopwatchInterval);
     clearInterval(this.countdownInterval);
     this.stopFloatingTick();
+    document.removeEventListener("click", this.onDocClick);
     if (window.electronAPI && window.electronAPI.removeFloatingActionListener) {
       window.electronAPI.removeFloatingActionListener();
     }
@@ -825,6 +876,21 @@ export default {
       this.saveSettings();
       if (window.electronAPI)
         window.electronAPI.setAlwaysOnTop(!!this.settings.alwaysOnTop);
+    },
+
+    // 不透明度滑条变更
+    onOpacityChange(e) {
+      const val = Number(e.target.value) / 100;
+      this.settings.floatingOpacity = val;
+      if (window.electronAPI) window.electronAPI.setFloatingOpacity(val);
+    },
+
+    // 点击外部关闭气泡
+    onDocClick(e) {
+      const wrap = this.$refs.floatSettingsRef;
+      if (wrap && !wrap.contains(e.target)) {
+        this.showFloatingSettings = false;
+      }
     },
 
     // ── 配置持久化 ────────────────────────────────
@@ -1471,12 +1537,18 @@ export default {
   margin-top: 0.25rem;
 }
 
+.floating-btn-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
 .floating-btn {
-  width: 100%;
+  flex: 1;
   padding: 0.85rem 1.5rem;
   border: none;
   border-radius: 50px;
-  background: linear-gradient(135deg, #667eea, #764ba2);
+  background: linear-gradient(135deg, #46e5d9, #007be8);
   color: white;
   font-size: 0.92rem;
   font-weight: 600;
@@ -1494,6 +1566,165 @@ export default {
 
 .floating-btn:active {
   transform: translateY(0);
+}
+
+/* ── 悬浮窗设置圆形按钮 ── */
+.float-settings-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.float-settings-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(10px);
+  color: rgba(60, 80, 100, 0.65);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background 0.22s ease,
+    color 0.22s ease,
+    transform 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.float-settings-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.float-settings-btn:hover {
+  background: rgba(255, 255, 255, 0.7);
+  color: #2c3e50;
+  transform: rotate(30deg);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+}
+
+.float-settings-btn.active {
+  background: rgba(79, 172, 254, 0.15);
+  color: #2176ae;
+  border-color: rgba(79, 172, 254, 0.4);
+  transform: rotate(60deg);
+}
+
+/* ── 气泡设置面板 ── */
+.float-settings-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  width: 220px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 16px;
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.13),
+    0 3px 10px rgba(0, 0, 0, 0.07);
+  padding: 14px 16px 16px;
+  z-index: 100;
+}
+
+.popover-arrow {
+  position: absolute;
+  bottom: -6px;
+  right: 15px;
+  width: 12px;
+  height: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.6);
+  transform: rotate(45deg);
+}
+
+.popover-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: rgba(44, 62, 80, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 12px;
+}
+
+.popover-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.popover-label {
+  font-size: 0.88rem;
+  color: #2c3e50;
+  font-weight: 500;
+}
+
+.popover-value {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #4facfe;
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: right;
+}
+
+.opacity-slider {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: linear-gradient(
+    to right,
+    #4facfe 0%,
+    #4facfe calc(var(--pct, 100%) * 1%),
+    rgba(0, 0, 0, 0.1) calc(var(--pct, 100%) * 1%),
+    rgba(0, 0, 0, 0.1) 100%
+  );
+  border-radius: 4px;
+  outline: none;
+  cursor: pointer;
+}
+
+.opacity-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  border: 2px solid #4facfe;
+  box-shadow: 0 2px 8px rgba(79, 172, 254, 0.35);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.opacity-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+.popover-hints {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 0.72rem;
+  color: rgba(80, 80, 80, 0.45);
+}
+
+/* 气泡弹出动画 */
+.popover-enter-active,
+.popover-leave-active {
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.popover-enter-from,
+.popover-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.96);
 }
 
 /* 时钟面板 options */

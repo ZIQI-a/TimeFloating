@@ -160,7 +160,12 @@ ipcMain.on("set-always-on-top", (_event, flag) => {
     floatingWindow.setAlwaysOnTop(flag);
   }
 });
-
+// ── IPC：设置悬浮窗不透明度 ────────────────────────────────────────────
+ipcMain.on("set-floating-opacity", (_event, opacity) => {
+  if (floatingWindow) {
+    floatingWindow.setOpacity(Math.min(1, Math.max(0.1, opacity)));
+  }
+});
 // ── IPC：动态调整悬浮窗尺寸 ──────────────────────────────────────────────────
 ipcMain.on("resize-floating", (_event, width, height) => {
   if (floatingWindow) {
@@ -191,6 +196,54 @@ ipcMain.on("push-timer-tick", (_event, data) => {
   if (floatingWindow && floatingWindow.webContents) {
     floatingWindow.webContents.send("timer-tick", data);
   }
+});
+
+// ── IPC：悬浮窗手动拖拽 ─────────────────────────────────────────────────────
+let dragStartPos = null;
+let dragStartBounds = null;
+let dragInterval = null;
+
+ipcMain.on("start-drag", () => {
+  if (!floatingWindow) return;
+  const { screen } = require("electron");
+  const cursor = screen.getCursorScreenPoint();
+  const bounds = floatingWindow.getBounds();
+  dragStartPos = cursor;
+  dragStartBounds = bounds;
+
+  // 用主进程轮询鼠标位置来驱动拖拽，避免渲染进程在透明窗口丢失鼠标事件
+  if (dragInterval) clearInterval(dragInterval);
+  dragInterval = setInterval(() => {
+    if (!floatingWindow || !dragStartPos) {
+      clearInterval(dragInterval);
+      dragInterval = null;
+      return;
+    }
+    const cur = screen.getCursorScreenPoint();
+    const dx = cur.x - dragStartPos.x;
+    const dy = cur.y - dragStartPos.y;
+    floatingWindow.setBounds({
+      x: dragStartBounds.x + dx,
+      y: dragStartBounds.y + dy,
+      width: dragStartBounds.width,
+      height: dragStartBounds.height,
+    });
+  }, 16);
+});
+
+ipcMain.on("stop-drag", () => {
+  dragStartPos = null;
+  dragStartBounds = null;
+  if (dragInterval) {
+    clearInterval(dragInterval);
+    dragInterval = null;
+  }
+});
+
+// ── IPC：锁定模式鼠标穿透 ────────────────────────────────────────────────────
+ipcMain.on("set-ignore-mouse-events", (_event, ignore) => {
+  if (!floatingWindow) return;
+  floatingWindow.setIgnoreMouseEvents(ignore, { forward: true });
 });
 
 // ── IPC：悬浮窗操作（开始/暂停/重置）→ 转发给主面板 ────────────────────────

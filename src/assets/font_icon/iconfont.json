@@ -6,6 +6,13 @@
   "description": "",
   "glyphs": [
     {
+      "icon_id": "25716467",
+      "name": "悬浮物",
+      "font_class": "xuanfuwu",
+      "unicode": "ea2e",
+      "unicode_decimal": 59950
+    },
+    {
       "icon_id": "3936092",
       "name": "咖啡",
       "font_class": "kafei",

@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.send("open-floating", floatingState),
   closeFloating: () => ipcRenderer.send("close-floating"),
   setAlwaysOnTop: (flag) => ipcRenderer.send("set-always-on-top", flag),
+  setFloatingOpacity: (opacity) => ipcRenderer.send("set-floating-opacity", opacity),
   resizeFloating: (width, height) =>
     ipcRenderer.send("resize-floating", width, height),
 
@@ -49,4 +50,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
   removeTimerTickListener: () => ipcRenderer.removeAllListeners("timer-tick"),
   removeFloatingActionListener: () =>
     ipcRenderer.removeAllListeners("floating-action"),
+
+  // 悬浮窗手动拖拽（替代 -webkit-app-region: drag，避免吞掉鼠标事件）
+  startDrag: () => ipcRenderer.send("start-drag"),
+  stopDrag: () => ipcRenderer.send("stop-drag"),
+
+  // 鼠标穿透（锁定模式）
+  setIgnoreMouseEvents: (ignore) => ipcRenderer.send("set-ignore-mouse-events", ignore),
 });
