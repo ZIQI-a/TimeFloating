@@ -25,13 +25,16 @@ function loadConfig() {
     console.error("读取配置失败:", error);
   }
   return {
-    font: "Rounded",
+    font: "Geometric",
     background: "gradient-1",
     muteSound: false,
     alwaysOnTop: true,
     showDate: true,
     hour24: true,
-    showMs: true,
+    showMs: false,
+    clockShowMs: false,
+    countdownShowMs: false,
+    floatingOpacity: 1,
   };
 }
 
@@ -42,11 +45,11 @@ let floatingStateCache = {
   settings: {}, // 同步自主面板 settings
 };
 
-// ── 窗口尺寸配置 ──────────────────────────────────────────────────────────────
+// ── 窗口尺寸配置（初始值，渲染后由 resize-floating 精确调整）────────────────
 const FLOATING_SIZES = {
-  clock: { width: 280, height: 130 },
-  stopwatch: { width: 280, height: 130 },
-  countdown: { width: 280, height: 130 },
+  clock: { width: 320, height: 150 },
+  stopwatch: { width: 320, height: 150 },
+  countdown: { width: 320, height: 150 },
 };
 
 // ── 窗口引用 ──────────────────────────────────────────────────────────────────

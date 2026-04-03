@@ -5,7 +5,7 @@
     @mouseenter="onRootMouseMove"
     @mouseleave="scheduleHideControls"
   >
-    <div class="capsule" @mousedown="onDragStart">
+    <div class="capsule" ref="capsule" @mousedown="onDragStart">
       <!-- 顶部拖拽指示条 -->
       <div class="drag-bar"></div>
 
@@ -285,6 +285,7 @@ export default {
     this.startRaf();
     this.subscribeToTicks();
     this.subscribeToStateUpdates();
+    this.$nextTick(() => this.fitWindow());
   },
 
   beforeUnmount() {
@@ -297,7 +298,38 @@ export default {
     }
   },
 
+  watch: {
+    // 字体、毫秒开关、模式变化时重新适配窗口宽度
+    "settings.font"() {
+      this.$nextTick(() => this.fitWindow());
+    },
+    "settings.showMs"() {
+      this.$nextTick(() => this.fitWindow());
+    },
+    "settings.clockShowMs"() {
+      this.$nextTick(() => this.fitWindow());
+    },
+    "settings.countdownShowMs"() {
+      this.$nextTick(() => this.fitWindow());
+    },
+    mode() {
+      this.$nextTick(() => this.fitWindow());
+    },
+  },
+
   methods: {
+    // ── 窗口自适应内容宽度 ────────────────────────
+    // capsule 无固定宽度，由内容撑开；测量后同步 Electron 窗口尺寸
+    fitWindow() {
+      const el = this.$refs.capsule;
+      if (!el || !window.electronAPI) return;
+      // scrollWidth 能反映实际内容宽度（不受 overflow:hidden 裁剪影响）
+      const w = Math.max(220, el.scrollWidth);
+      const h = el.offsetHeight;
+      // 窗口 = 胶囊尺寸 + 四周留出 20px 透明边距（供阴影和视觉呼吸）
+      window.electronAPI.resizeFloating(w + 20, h + 20);
+    },
+
     // ── 初始化 ────────────────────────────────────
     async loadInitialState() {
       if (!window.electronAPI) return;
@@ -710,7 +742,7 @@ export default {
   align-items: center;
   justify-content: center;
 
-  width: 280px;
+  min-width: 220px;
   height: 120px;
 
   /* 玻璃拟态 */

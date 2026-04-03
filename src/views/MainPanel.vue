@@ -2,6 +2,13 @@
   <div class="main-panel">
     <!-- 左侧展示区：随 Tab 联动 -->
     <div class="left-panel" :style="leftPanelStyle">
+      <!-- 自定义图片液态毛玻璃蒙版 -->
+      <transition name="overlay-fade">
+        <div
+          v-if="settings.background === 'custom' && settings.customBgImage"
+          class="left-bg-overlay"
+        ></div>
+      </transition>
       <!-- 时钟模式 -->
       <transition name="left-fade" mode="out-in">
         <div v-if="activeTab === 'clock'" key="clock" class="left-content">
@@ -289,6 +296,47 @@
               :style="{ background: bg.preview }"
               @click="settings.background = bg.value"
             ></div>
+            <!-- 自定义图片上传按钮 -->
+            <div
+              class="bg-option bg-option--upload"
+              :class="{ active: settings.background === 'custom' }"
+              :style="
+                settings.customBgImage
+                  ? {
+                      backgroundImage: `url(${settings.customBgImage})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                    }
+                  : {}
+              "
+              @click="selectCustomBg"
+              title="自定义图片背景"
+            >
+              <svg
+                v-if="
+                  !(settings.background === 'custom' && settings.customBgImage)
+                "
+                class="upload-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="4" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <polyline points="21 15 16 10 5 21" />
+              </svg>
+            </div>
+            <!-- 隐藏文件选择器 -->
+            <input
+              ref="bgImageInput"
+              type="file"
+              accept="image/*"
+              style="display: none"
+              @change="onBgImageChange"
+            />
           </div>
         </div>
 
@@ -451,10 +499,11 @@ export default {
         alwaysOnTop: true,
         showDate: true,
         hour24: true,
-        showMs: true,
+        showMs: false,
         clockShowMs: false,
         countdownShowMs: false,
         floatingOpacity: 1,
+        customBgImage: null,
         // 秒表内部精确起始时间戳（不存入持久化，仅运行时用）
       },
 
@@ -465,8 +514,8 @@ export default {
       ],
 
       fontOptions: [
-        { name: "圆润", value: "Rounded" },
-        { name: "等线", value: "Mono" },
+        { name: "等线", value: "Rounded" },
+        { name: "圆润", value: "Mono" },
         { name: "衬线", value: "Serif" },
       ],
 
@@ -495,9 +544,50 @@ export default {
     };
   },
 
+  watch: {
+    // settings 中用户可手动切换的字段变化时自动持久化
+    "settings.showMs"() {
+      this.saveSettings();
+    },
+    "settings.clockShowMs"() {
+      this.saveSettings();
+    },
+    "settings.countdownShowMs"() {
+      this.saveSettings();
+    },
+    "settings.showDate"() {
+      this.saveSettings();
+    },
+    "settings.hour24"() {
+      this.saveSettings();
+    },
+    "settings.font"() {
+      this.saveSettings();
+    },
+    "settings.background"() {
+      this.saveSettings();
+    },
+    "settings.floatingOpacity"() {
+      this.saveSettings();
+    },
+    "settings.customBgImage"() {
+      this.saveSettings();
+    },
+  },
+
   computed: {
     // 左侧面板背景随主题变化
     leftPanelStyle() {
+      if (
+        this.settings.background === "custom" &&
+        this.settings.customBgImage
+      ) {
+        return {
+          backgroundImage: `url(${this.settings.customBgImage})`,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        };
+      }
       const map = {
         "gradient-1": "linear-gradient(135deg, #a8e6cf, #dcedc1)",
         "gradient-2": "linear-gradient(135deg, #ffd3a5, #ffe5c8)",
@@ -895,6 +985,24 @@ export default {
         window.electronAPI.setAlwaysOnTop(!!this.settings.alwaysOnTop);
     },
 
+    // 自定义背景图片
+    selectCustomBg() {
+      this.$refs.bgImageInput.click();
+    },
+
+    onBgImageChange(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        this.settings.customBgImage = ev.target.result;
+        this.settings.background = "custom";
+      };
+      reader.readAsDataURL(file);
+      // 重置 input 以支持重复选择同一文件
+      e.target.value = "";
+    },
+
     // 不透明度滑条变更
     onOpacityChange(e) {
       const val = Number(e.target.value) / 100;
@@ -959,12 +1067,33 @@ export default {
   overflow: hidden;
 }
 
+/* 自定义图片液态毛玻璃蒙版 */
+.left-bg-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.3);
+  backdrop-filter: blur(18px) saturate(180%);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+  z-index: 0;
+}
+
+.overlay-fade-enter-active,
+.overlay-fade-leave-active {
+  transition: opacity 0.5s ease;
+}
+.overlay-fade-enter-from,
+.overlay-fade-leave-to {
+  opacity: 0;
+}
+
 .left-content {
   text-align: center;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 1rem;
+  position: relative;
+  z-index: 1;
 }
 
 .left-time {
@@ -1518,6 +1647,38 @@ export default {
 
 .bg-option:hover:not(.active) {
   transform: scale(1.06);
+}
+
+/* 自定义图片上传按钮 */
+.bg-option--upload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.35);
+  border: 2px dashed rgba(0, 0, 0, 0.18);
+  color: rgba(80, 80, 80, 0.45);
+  overflow: hidden;
+  transition:
+    transform 0.25s ease,
+    border-color 0.25s ease,
+    color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.bg-option--upload:hover:not(.active) {
+  transform: scale(1.06);
+  border-color: rgba(79, 172, 254, 0.55);
+  color: #4facfe;
+}
+
+.bg-option--upload.active {
+  border-style: solid;
+}
+
+.upload-icon {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
 }
 
 /* 字体按钮 */
