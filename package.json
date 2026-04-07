@@ -2,6 +2,8 @@
   "name": "floating-clock",
   "private": true,
   "version": "0.1.0",
+  "description": "一个简洁的桌面悬浮时钟",
+  "author": "王子琦",
   "main": "electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -26,16 +28,18 @@
     "wait-on": "^9.0.4"
   },
   "build": {
-    "appId": "com.floatingclock.app",
-    "productName": "悬浮时钟",
+    "appId": "com.ziqi.floatclock",
+    "productName": "浮光时钟",
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "public/icon.icns",
       "target": [
         "dmg",
         "zip"
       ]
     },
     "win": {
+      "icon": "public/icon.ico",
       "target": [
         "nsis",
         "portable"
