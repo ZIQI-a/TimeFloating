@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
-const { initConfigStore, loadConfig, saveConfig } = require("./configStore");
+const { initConfigStore, loadConfig, saveConfig } = require("./configStore.cjs");
 
 // ── 悬浮窗状态缓存（主进程做中转）────────────────────────────────────────────
 // 由主面板在"开启悬浮模式"前写入，悬浮窗启动后读取
@@ -35,7 +35,7 @@ function createMainWindow() {
     minWidth: 900,
     minHeight: 650,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },
@@ -79,7 +79,7 @@ function createFloatingWindow() {
     skipTaskbar: true,
     hasShadow: false,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },

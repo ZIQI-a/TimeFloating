@@ -1,10 +1,11 @@
 {
   "name": "floating-clock",
   "private": true,
+  "type": "module",
   "version": "0.1.0",
   "description": "一个简洁的桌面悬浮时钟",
   "author": "王子琦",
-  "main": "electron/main.js",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

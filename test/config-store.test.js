@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { DEFAULT_SETTINGS, normalizeSettings } = require("../electron/configStore.js");
+const { DEFAULT_SETTINGS, normalizeSettings } = require("../electron/configStore.cjs");
 
 test("normalizeSettings fills defaults and ignores unknown keys", () => {
   const normalized = normalizeSettings({
