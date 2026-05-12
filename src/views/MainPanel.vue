@@ -463,6 +463,22 @@ import {
   buildFloatingTickPayload,
 } from "../utils/floatingState";
 import {
+  applyCountdownPresetState,
+  finishCountdownState,
+  pauseCountdownState,
+  resetCountdownState,
+  resetStopwatchState,
+  startCountdownState,
+  toggleStopwatchState,
+} from "../utils/timerState";
+import {
+  handleFloatingAction,
+  openFloatingWindow,
+  pushFloatingSnapshot,
+  startFloatingTicker,
+  stopFloatingTicker,
+} from "../services/floatingSync";
+import {
   clampCountdownValue,
   formatCountdown,
   formatStopwatch,
@@ -757,79 +773,84 @@ export default {
 
     // ── 秒表 ──────────────────────────────────────
     toggleStopwatch() {
-      if (this.stopwatchRunning) {
-        // 暂停：记录已累计时间，清除 RAF 起始点
-        this.stopwatchTime = Date.now() - this._swStart;
-        this._swStart = undefined;
-        this.stopwatchRunning = false;
-      } else {
-        // 继续/开始：记录起始时间戳（已累计时间作偏移）
-        this._swStart = Date.now() - this.stopwatchTime;
-        this.stopwatchRunning = true;
-      }
+      const nextState = toggleStopwatchState(
+        {
+          running: this.stopwatchRunning,
+          time: this.stopwatchTime,
+          startAt: this._swStart,
+        },
+        Date.now(),
+      );
+      this.stopwatchTime = nextState.time;
+      this._swStart = nextState.startAt;
+      this.stopwatchRunning = nextState.running;
     },
 
     resetStopwatch() {
-      this._swStart = undefined;
-      this.stopwatchTime = 0;
-      this.stopwatchRunning = false;
+      const nextState = resetStopwatchState();
+      this._swStart = nextState.startAt;
+      this.stopwatchTime = nextState.time;
+      this.stopwatchRunning = nextState.running;
     },
 
     // ── 倒计时 ────────────────────────────────────
     toggleCountdown() {
       if (this.countdownRunning) {
-        clearInterval(this.countdownInterval);
+        const nextState = pauseCountdownState(this._cdEndAt, Date.now());
         // 暂停时把当前剩余时间固化到展示字段，便于后续继续计时。
-        if (this._cdEndAt !== undefined) {
-          const remainingMs = Math.max(0, this._cdEndAt - Date.now());
-          this.syncCountdownFromRemainingMs(remainingMs);
-        }
-        this._cdEndAt = undefined;
-        this.countdownRunning = false;
+        this.syncCountdownFromRemainingMs(nextState.remainingMs);
+        this._cdEndAt = nextState.endAt;
+        this.countdownRunning = nextState.running;
         return;
       }
-      const total =
-        this.countdownHours * 3600 +
-        this.countdownMinutes * 60 +
-        this.countdownSeconds;
-      if (total <= 0) return;
 
-      // 记录本次初始值，供 computed 判断是否展示小时
-      this.countdownInitHours = this.countdownHours;
-      this.countdownInitMinutes = this.countdownMinutes;
-      this.countdownInitSeconds = this.countdownSeconds;
-      this.countdownFinished = false;
-      this.countdownEnding = false;
-      this.countdownRunning = true;
-      // 记录结束时间戳。展示值由 RAF 按剩余时间实时推导，避免首秒多算。
-      this._cdEndAt = Date.now() + total * 1000;
-      this.syncCountdownFromRemainingMs(total * 1000);
+      const nextState = startCountdownState(
+        {
+          hours: this.countdownHours,
+          minutes: this.countdownMinutes,
+          seconds: this.countdownSeconds,
+        },
+        Date.now(),
+      );
+      if (!nextState) return;
+
+      // 记录本次初始值，供 computed 判断是否展示小时。
+      this.countdownInitHours = nextState.initHours;
+      this.countdownInitMinutes = nextState.initMinutes;
+      this.countdownInitSeconds = nextState.initSeconds;
+      this.countdownFinished = nextState.finished;
+      this.countdownEnding = nextState.ending;
+      this.countdownRunning = nextState.running;
+      this._cdEndAt = nextState.endAt;
+      this.syncCountdownFromRemainingMs(nextState.remainingMs);
     },
 
     finishCountdown() {
-      clearInterval(this.countdownInterval);
-      this._cdEndAt = undefined;
-      this._cdSecStart = undefined;
-      this.countdownRunning = false;
-      this.countdownFinished = true;
-      this.countdownEnding = false;
-      this.countdownMs = 0;
-      this.countdownHours = 0;
-      this.countdownMinutes = 0;
-      this.countdownSeconds = 0;
+      const nextState = finishCountdownState();
+      this._cdEndAt = nextState.endAt;
+      this.countdownRunning = nextState.running;
+      this.countdownFinished = nextState.finished;
+      this.countdownEnding = nextState.ending;
+      this.countdownMs = nextState.ms;
+      this.countdownHours = nextState.hours;
+      this.countdownMinutes = nextState.minutes;
+      this.countdownSeconds = nextState.seconds;
     },
 
     resetCountdown() {
-      clearInterval(this.countdownInterval);
-      this._cdEndAt = undefined;
-      this._cdSecStart = undefined;
-      this.countdownRunning = false;
-      this.countdownFinished = false;
-      this.countdownEnding = false;
-      this.countdownMs = 0;
-      this.countdownHours = this.countdownInitHours;
-      this.countdownMinutes = this.countdownInitMinutes;
-      this.countdownSeconds = this.countdownInitSeconds;
+      const nextState = resetCountdownState({
+        initHours: this.countdownInitHours,
+        initMinutes: this.countdownInitMinutes,
+        initSeconds: this.countdownInitSeconds,
+      });
+      this._cdEndAt = nextState.endAt;
+      this.countdownRunning = nextState.running;
+      this.countdownFinished = nextState.finished;
+      this.countdownEnding = nextState.ending;
+      this.countdownMs = nextState.ms;
+      this.countdownHours = nextState.hours;
+      this.countdownMinutes = nextState.minutes;
+      this.countdownSeconds = nextState.seconds;
     },
 
     syncCountdownFromRemainingMs(remainingMs) {
@@ -846,14 +867,15 @@ export default {
 
     applyPreset(minutes) {
       if (this.countdownRunning) return;
-      this.countdownHours = 0;
-      this.countdownMinutes = minutes;
-      this.countdownSeconds = 0;
-      this.countdownInitHours = 0;
-      this.countdownInitMinutes = minutes;
-      this.countdownInitSeconds = 0;
-      this.countdownFinished = false;
-      this.countdownEnding = false;
+      const nextState = applyCountdownPresetState(minutes);
+      this.countdownHours = nextState.hours;
+      this.countdownMinutes = nextState.minutes;
+      this.countdownSeconds = nextState.seconds;
+      this.countdownInitHours = nextState.initHours;
+      this.countdownInitMinutes = nextState.initMinutes;
+      this.countdownInitSeconds = nextState.initSeconds;
+      this.countdownFinished = nextState.finished;
+      this.countdownEnding = nextState.ending;
     },
 
     clampCountdown() {
@@ -865,13 +887,10 @@ export default {
     // ── 悬浮窗 ────────────────────────────────────
     async openFloatingMode() {
       await this.saveSettings();
-      if (window.electronAPI) {
-        // 打开悬浮窗时先发一份完整快照，确保它拿到一套可直接渲染的初始状态。
-        const state = this.getFloatingStatePayload();
-        window.electronAPI.openFloating(state);
-        // 开始推送实时 tick 给悬浮窗
-        this.startFloatingTick();
-      }
+      if (!window.electronAPI) return;
+      // 打开悬浮窗时先发一份完整快照，确保它拿到一套可直接渲染的初始状态。
+      openFloatingWindow(window.electronAPI, this.getFloatingStatePayload());
+      this.startFloatingTick();
     },
 
     getFloatingStatePayload() {
@@ -934,27 +953,27 @@ export default {
     },
 
     pushFloatingSnapshot() {
-      if (!window.electronAPI) return;
       // 动作刚发生时立即发一份快照 + 当前 tick，避免悬浮窗再等下一轮 80ms 定时推送。
-      window.electronAPI.pushFloatingState(this.getFloatingStatePayload());
-      window.electronAPI.pushTimerTick(this.getFloatingTickPayload());
+      pushFloatingSnapshot(
+        window.electronAPI,
+        this.getFloatingStatePayload(),
+        this.getFloatingTickPayload(),
+      );
     },
 
     // 开始向悬浮窗推送实时计时数据
     startFloatingTick() {
       this.stopFloatingTick();
-      this._floatingTickInterval = setInterval(() => {
-        if (!window.electronAPI) return;
-        // 高频通道只做实时同步，不承担完整状态恢复职责。
-        window.electronAPI.pushTimerTick(this.getFloatingTickPayload());
-      }, 80);
+      // 高频通道只做实时同步，不承担完整状态恢复职责。
+      this._floatingTickInterval = startFloatingTicker(
+        window.electronAPI,
+        () => this.getFloatingTickPayload(),
+        80,
+      );
     },
 
     stopFloatingTick() {
-      if (this._floatingTickInterval) {
-        clearInterval(this._floatingTickInterval);
-        this._floatingTickInterval = null;
-      }
+      this._floatingTickInterval = stopFloatingTicker(this._floatingTickInterval);
     },
 
     // 监听悬浮窗发来的操作指令
@@ -964,13 +983,15 @@ export default {
       window.electronAPI.onFloatingAction((action) => {
         // 主面板仍然是计时状态的唯一来源。
         // 悬浮窗只负责上报动作，不直接决定最终业务状态。
-        if (action === "stopwatch-toggle") this.toggleStopwatch();
-        else if (action === "stopwatch-reset") this.resetStopwatch();
-        else if (action === "countdown-toggle") this.toggleCountdown();
-        else if (action === "countdown-reset") this.resetCountdown();
-        else if (action === "close") this.stopFloatingTick();
+        const handled = handleFloatingAction(action, {
+          "stopwatch-toggle": () => this.toggleStopwatch(),
+          "stopwatch-reset": () => this.resetStopwatch(),
+          "countdown-toggle": () => this.toggleCountdown(),
+          "countdown-reset": () => this.resetCountdown(),
+          close: () => this.stopFloatingTick(),
+        });
 
-        if (action !== "close") {
+        if (handled && action !== "close") {
           this.pushFloatingSnapshot();
         }
       });
