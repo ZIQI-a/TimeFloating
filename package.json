@@ -9,7 +9,7 @@
     "dev": "vite",
     "build": "vite build",
     "test": "node --test",
-    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "electron:dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5998 && VITE_DEV_SERVER_URL=http://localhost:5998 electron .\"",
     "electron:build": "npm run build && electron-builder",
     "preview": "vite preview    "
   },

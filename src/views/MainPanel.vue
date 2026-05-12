@@ -448,6 +448,21 @@
 
 <script>
 import {
+  formatClockDate,
+  formatClockTime,
+  getClockDayPeriod,
+  getTenthsMsDigit,
+  stripClockDayPeriod,
+} from "../utils/clock";
+import {
+  deriveCountdownParts,
+  getCountdownRemainingMs,
+} from "../utils/countdown";
+import {
+  buildFloatingStatePayload,
+  buildFloatingTickPayload,
+} from "../utils/floatingState";
+import {
   clampCountdownValue,
   formatCountdown,
   formatStopwatch,
@@ -608,8 +623,8 @@ export default {
     // 时钟：纯时间部分（去掉 上午/下午 前缀）
     clockTimeOnly() {
       if (!this.settings.hour24) {
-        // 12小时制：toLocaleTimeString 可能返回 "下午 02:30:05"，去掉前缀
-        return this.currentTime.replace(/^(上午|下午|AM|PM)\s*/i, "").trim();
+        // 12 小时制下统一去掉前缀，由独立标签负责展示上午/下午。
+        return stripClockDayPeriod(this.currentTime);
       }
       return this.currentTime;
     },
@@ -617,8 +632,7 @@ export default {
     // 上午 / 下午 标记（仅 12 小时制时有值）
     clockAmPm() {
       if (this.settings.hour24) return "";
-      const match = this.currentTime.match(/^(上午|下午|AM|PM)/i);
-      return match ? match[1] : "";
+      return getClockDayPeriod(this.currentTime);
     },
 
     // 胶囊指示器位置
@@ -638,7 +652,7 @@ export default {
     // 时钟毫秒位（1位）—— 依赖 _msTick（由 RAF 驱动）触发响应式更新
     clockMs() {
       void this._msTick; // 建立响应式依赖
-      return Math.floor((Date.now() % 1000) / 100);
+      return getTenthsMsDigit(this._msTick);
     },
 
     // 带毫秒的时钟显示
@@ -722,17 +736,8 @@ export default {
     // ── 时间更新 ──────────────────────────────────
     updateTime() {
       const now = new Date();
-      this.currentTime = now.toLocaleTimeString("zh-CN", {
-        hour12: !this.settings.hour24,
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-      this.currentDate = now.toLocaleDateString("zh-CN", {
-        month: "long",
-        day: "numeric",
-        weekday: "long",
-      });
+      this.currentTime = formatClockTime(now, this.settings.hour24);
+      this.currentDate = formatClockDate(now);
     },
 
     // ── 监听设置变化立即刷新时间 ──────────────────
@@ -828,16 +833,15 @@ export default {
     },
 
     syncCountdownFromRemainingMs(remainingMs) {
-      // 倒计时展示按“剩余开区间”处理：
-      // 刚点击开始时，05:00 会立刻进入 04:59.9，而不是额外显示完整一秒的 05:00.x。
-      const normalizedMs = Math.max(0, remainingMs - 1);
-      const totalSeconds = Math.floor(normalizedMs / 1000);
-
-      this.countdownHours = Math.floor(totalSeconds / 3600);
-      this.countdownMinutes = Math.floor((totalSeconds % 3600) / 60);
-      this.countdownSeconds = totalSeconds % 60;
-      this.countdownMs = normalizedMs % 1000;
-      this.countdownEnding = totalSeconds < 10 && remainingMs > 0;
+      // 倒计时展示按“剩余开区间”处理，避免开始瞬间多显示一整秒。
+      const nextState = deriveCountdownParts(remainingMs, {
+        excludeCurrentSecond: true,
+      });
+      this.countdownHours = nextState.hours;
+      this.countdownMinutes = nextState.minutes;
+      this.countdownSeconds = nextState.seconds;
+      this.countdownMs = nextState.ms;
+      this.countdownEnding = nextState.ending;
     },
 
     applyPreset(minutes) {
@@ -871,53 +875,48 @@ export default {
     },
 
     getFloatingStatePayload() {
-      // 这是“低频完整快照”，用于初始化悬浮窗，或在关键动作后整包校正状态。
-      return JSON.parse(
-        JSON.stringify({
-          mode: this.activeTab,
-          settings: this.settings,
-          stopwatchTime: this.stopwatchTime,
-          stopwatchRunning: this.stopwatchRunning,
-          countdownHours: this.countdownHours,
-          countdownMinutes: this.countdownMinutes,
-          countdownSeconds: this.countdownSeconds,
-          countdownInitHours: this.countdownInitHours,
-          countdownInitMinutes: this.countdownInitMinutes,
-          countdownInitSeconds: this.countdownInitSeconds,
-          countdownRunning: this.countdownRunning,
-          countdownFinished: this.countdownFinished,
-          countdownEnding: this.countdownEnding,
-          // 显式同步剩余时间基准，避免悬浮窗只拿到“当前秒数”却无法正确推进。
-          countdownRemainingMs: this.getCountdownRemainingMs(),
-        }),
-      );
+      // 低频完整快照负责状态恢复和关键动作后的整包同步。
+      return buildFloatingStatePayload({
+        mode: this.activeTab,
+        settings: this.settings,
+        stopwatchTime: this.stopwatchTime,
+        stopwatchRunning: this.stopwatchRunning,
+        countdownHours: this.countdownHours,
+        countdownMinutes: this.countdownMinutes,
+        countdownSeconds: this.countdownSeconds,
+        countdownMs: this.countdownMs,
+        countdownInitHours: this.countdownInitHours,
+        countdownInitMinutes: this.countdownInitMinutes,
+        countdownInitSeconds: this.countdownInitSeconds,
+        countdownRunning: this.countdownRunning,
+        countdownFinished: this.countdownFinished,
+        countdownEnding: this.countdownEnding,
+        countdownRemainingMs: this.getCountdownRemainingMs(),
+      });
     },
 
     getFloatingTickPayload() {
-      // 这是“高频增量数据”，只带悬浮窗实时显示所需的字段。
-      return JSON.parse(
-        JSON.stringify({
-          mode: this.activeTab,
-          stopwatchTime: this.stopwatchTime,
-          stopwatchRunning: this.stopwatchRunning,
-          stopwatchShowMs: this.settings.showMs,
-          countdownHours: this.countdownHours,
-          countdownMinutes: this.countdownMinutes,
-          countdownSeconds: this.countdownSeconds,
-          countdownInitHours: this.countdownInitHours,
-          countdownInitMinutes: this.countdownInitMinutes,
-          countdownInitSeconds: this.countdownInitSeconds,
-          countdownMs: this.countdownMs,
-          countdownShowMs: this.settings.countdownShowMs,
-          countdownRunning: this.countdownRunning,
-          countdownFinished: this.countdownFinished,
-          countdownEnding: this.countdownEnding,
-          // 高频通道同步剩余毫秒，悬浮窗据此在本地逐帧推导显示。
-          countdownRemainingMs: this.getCountdownRemainingMs(),
-          currentTime: this.currentTime,
-          clockShowMs: this.settings.clockShowMs,
-        }),
-      );
+      // 高频增量数据只同步实时显示需要的字段。
+      return buildFloatingTickPayload({
+        mode: this.activeTab,
+        stopwatchTime: this.stopwatchTime,
+        stopwatchRunning: this.stopwatchRunning,
+        stopwatchShowMs: this.settings.showMs,
+        countdownHours: this.countdownHours,
+        countdownMinutes: this.countdownMinutes,
+        countdownSeconds: this.countdownSeconds,
+        countdownMs: this.countdownMs,
+        countdownShowMs: this.settings.countdownShowMs,
+        countdownInitHours: this.countdownInitHours,
+        countdownInitMinutes: this.countdownInitMinutes,
+        countdownInitSeconds: this.countdownInitSeconds,
+        countdownRunning: this.countdownRunning,
+        countdownFinished: this.countdownFinished,
+        countdownEnding: this.countdownEnding,
+        countdownRemainingMs: this.getCountdownRemainingMs(),
+        currentTime: this.currentTime,
+        clockShowMs: this.settings.clockShowMs,
+      });
     },
 
     // 统一导出倒计时剩余毫秒，保证主面板和悬浮窗基于同一时间基准。
@@ -926,14 +925,12 @@ export default {
         return Math.max(0, this._cdEndAt - Date.now());
       }
 
-      return Math.max(
-        0,
-        (this.countdownHours * 3600 +
-          this.countdownMinutes * 60 +
-          this.countdownSeconds) *
-          1000 +
-          this.countdownMs,
-      );
+      return getCountdownRemainingMs({
+        hours: this.countdownHours,
+        minutes: this.countdownMinutes,
+        seconds: this.countdownSeconds,
+        ms: this.countdownMs,
+      });
     },
 
     pushFloatingSnapshot() {

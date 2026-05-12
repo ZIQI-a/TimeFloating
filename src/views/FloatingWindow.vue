@@ -189,6 +189,15 @@
 </template>
 
 <script>
+import {
+  formatClockTime,
+  getTenthsMsDigit,
+  stripClockDayPeriod,
+} from "../utils/clock";
+import {
+  deriveCountdownParts,
+  getCountdownRemainingMs,
+} from "../utils/countdown";
 import { formatCountdown, formatStopwatch } from "../utils/time";
 
 export default {
@@ -253,7 +262,7 @@ export default {
     clockDisplayTime() {
       void this._rafTick; // 建立响应式依赖，每帧刷新
       if (this.settings.clockShowMs) {
-        const c = Math.floor((Date.now() % 1000) / 100);
+        const c = getTenthsMsDigit(this._rafTick);
         return `${this.currentTime}.${c}`;
       }
       return this.currentTime;
@@ -450,15 +459,10 @@ export default {
     },
 
     updateClock() {
-      const now = new Date();
-      const timeStr = now.toLocaleTimeString("zh-CN", {
-        hour12: !this.settings.hour24,
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-      // 去掉上午/下午前缀
-      this.currentTime = timeStr.replace(/^(上午|下午|AM|PM)\s*/i, "").trim();
+      // 悬浮窗只展示纯时间文本，上午/下午前缀统一在工具层剥离。
+      this.currentTime = stripClockDayPeriod(
+        formatClockTime(new Date(), this.settings.hour24),
+      );
       // 毫秒由 RAF + _rafTick 驱动，clockShowMs 时追加
     },
 
@@ -607,26 +611,25 @@ export default {
 
     // 统一从剩余毫秒推导倒计时展示，确保秒数与毫秒同源。
     syncCountdownFromRemainingMs(remainingMs) {
-      const normalizedMs = Math.max(0, remainingMs);
-      const totalSeconds = Math.floor(normalizedMs / 1000);
-
-      this.countdownHours = Math.floor(totalSeconds / 3600);
-      this.countdownMinutes = Math.floor((totalSeconds % 3600) / 60);
-      this.countdownSeconds = totalSeconds % 60;
-      this._cdMs = normalizedMs % 1000;
-      this.countdownEnding = totalSeconds < 10 && remainingMs > 0;
+      // 与主面板共享同一套剩余时间推导，避免悬浮窗与主面板边界不一致。
+      const nextState = deriveCountdownParts(remainingMs, {
+        excludeCurrentSecond: true,
+      });
+      this.countdownHours = nextState.hours;
+      this.countdownMinutes = nextState.minutes;
+      this.countdownSeconds = nextState.seconds;
+      this._cdMs = nextState.ms;
+      this.countdownEnding = nextState.ending;
     },
 
     // 当前展示值还原为剩余毫秒，供本地乐观更新和恢复计时使用。
     getCurrentCountdownRemainingMs() {
-      return Math.max(
-        0,
-        (this.countdownHours * 3600 +
-          this.countdownMinutes * 60 +
-          this.countdownSeconds) *
-          1000 +
-          this._cdMs,
-      );
+      return getCountdownRemainingMs({
+        hours: this.countdownHours,
+        minutes: this.countdownMinutes,
+        seconds: this.countdownSeconds,
+        ms: this._cdMs,
+      });
     },
 
     finishCountdown() {
