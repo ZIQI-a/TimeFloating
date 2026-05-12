@@ -1,42 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
-const fs = require("fs");
-const os = require("os");
-
-// ── 配置持久化 ────────────────────────────────────────────────────────────────
-const configPath = path.join(os.homedir(), ".floating-clock-config.json");
-
-function saveConfig(data) {
-  try {
-    fs.writeFileSync(configPath, JSON.stringify(data, null, 2));
-    return true;
-  } catch (error) {
-    console.error("保存配置失败:", error);
-    return false;
-  }
-}
-
-function loadConfig() {
-  try {
-    if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, "utf8"));
-    }
-  } catch (error) {
-    console.error("读取配置失败:", error);
-  }
-  return {
-    font: "Geometric",
-    background: "gradient-1",
-    muteSound: false,
-    alwaysOnTop: true,
-    showDate: true,
-    hour24: true,
-    showMs: false,
-    clockShowMs: false,
-    countdownShowMs: false,
-    floatingOpacity: 1,
-  };
-}
+const { initConfigStore, loadConfig, saveConfig } = require("./configStore");
 
 // ── 悬浮窗状态缓存（主进程做中转）────────────────────────────────────────────
 // 由主面板在"开启悬浮模式"前写入，悬浮窗启动后读取
@@ -270,7 +234,9 @@ ipcMain.handle("get-settings", () => {
 });
 
 // ── 应用生命周期 ──────────────────────────────────────────────────────────────
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  // 先初始化配置存储，再创建窗口，保证窗口启动时就能读取到稳定配置。
+  await initConfigStore();
   createMainWindow();
 
   app.on("activate", () => {
