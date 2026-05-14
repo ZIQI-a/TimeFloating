@@ -7,6 +7,7 @@ const { app } = require("electron");
 const DEFAULT_SETTINGS = {
   font: "Geometric",
   background: "gradient-1",
+  countdownNotify: true,
   muteSound: false,
   alwaysOnTop: true,
   showDate: true,

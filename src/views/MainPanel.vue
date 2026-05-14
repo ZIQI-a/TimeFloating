@@ -274,6 +274,30 @@
                 >10分钟
               </button>
             </div>
+
+            <div class="clock-options countdown-options">
+              <div class="option-row">
+                <span class="option-label">结束时通知</span>
+                <label class="toggle-switch">
+                  <input type="checkbox" v-model="settings.countdownNotify" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div
+                class="option-row"
+                :class="{ 'option-row--disabled': !settings.countdownNotify }"
+              >
+                <span class="option-label">静默通知</span>
+                <label class="toggle-switch">
+                  <input
+                    type="checkbox"
+                    v-model="settings.muteSound"
+                    :disabled="!settings.countdownNotify"
+                  />
+                  <span class="slider"></span>
+                </label>
+              </div>
+            </div>
           </div>
         </transition>
       </div>
@@ -527,6 +551,8 @@ export default {
       settings: {
         font: "Geometric",
         background: "gradient-1",
+        countdownNotify: true,
+        muteSound: false,
         alwaysOnTop: true,
         showDate: true,
         hour24: true,
@@ -584,6 +610,12 @@ export default {
       this.saveSettings();
     },
     "settings.countdownShowMs"() {
+      this.saveSettings();
+    },
+    "settings.countdownNotify"() {
+      this.saveSettings();
+    },
+    "settings.muteSound"() {
       this.saveSettings();
     },
     "settings.showDate"() {
@@ -835,6 +867,7 @@ export default {
       this.countdownHours = nextState.hours;
       this.countdownMinutes = nextState.minutes;
       this.countdownSeconds = nextState.seconds;
+      this.notifyCountdownFinished();
     },
 
     resetCountdown() {
@@ -1026,6 +1059,17 @@ export default {
       const val = Number(e.target.value) / 100;
       this.settings.floatingOpacity = val;
       if (window.electronAPI) window.electronAPI.setFloatingOpacity(val);
+    },
+
+    async notifyCountdownFinished() {
+      if (!this.settings.countdownNotify) return;
+      if (!window.electronAPI) return;
+
+      await window.electronAPI.notifyCountdownFinished({
+        title: "浮光时钟",
+        body: "倒计时已结束，记得安排下一步。",
+        silent: !!this.settings.muteSound,
+      });
     },
 
     // 点击外部关闭气泡
@@ -1366,6 +1410,10 @@ export default {
   padding: 0.6rem 0;
 }
 
+.option-row--disabled {
+  opacity: 0.55;
+}
+
 .option-label {
   font-size: 0.92rem;
   color: #444;
@@ -1427,6 +1475,10 @@ export default {
   align-items: center;
   margin: 0.5rem 0 1.5rem;
   gap: 8px;
+}
+
+.countdown-options {
+  margin-top: 1rem;
 }
 
 .time-unit {

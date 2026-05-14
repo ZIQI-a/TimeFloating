@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const { initConfigStore, loadConfig, saveConfig } = require("./configStore.cjs");
+const { notifyCountdownFinished } = require("./notificationService.cjs");
 
 // ── 悬浮窗状态缓存（主进程做中转）────────────────────────────────────────────
 // 由主面板在"开启悬浮模式"前写入，悬浮窗启动后读取
@@ -231,6 +232,11 @@ ipcMain.handle("save-settings", (_event, settings) => {
 // ── IPC：读取配置 ─────────────────────────────────────────────────────────────
 ipcMain.handle("get-settings", () => {
   return loadConfig();
+});
+
+// ── IPC：倒计时完成通知 ─────────────────────────────────────────────────────
+ipcMain.handle("notify-countdown-finished", (_event, payload = {}) => {
+  return notifyCountdownFinished(payload);
 });
 
 // ── 应用生命周期 ──────────────────────────────────────────────────────────────

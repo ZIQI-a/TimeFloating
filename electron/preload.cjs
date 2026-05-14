@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // 数据持久化
   saveSettings: (settings) => ipcRenderer.invoke("save-settings", settings),
   getSettings: () => ipcRenderer.invoke("get-settings"),
+  notifyCountdownFinished: (payload) =>
+    ipcRenderer.invoke("notify-countdown-finished", payload),
 
   // 主面板完整状态快照：既写入主进程缓存，也可转发给已打开的悬浮窗
   pushFloatingState: (state) => ipcRenderer.send("push-floating-state", state),
