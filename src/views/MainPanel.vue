@@ -1036,6 +1036,7 @@ export default {
         window.electronAPI.setAlwaysOnTop(!!this.settings.alwaysOnTop);
     },
 
+
     // 自定义背景图片
     selectCustomBg() {
       this.$refs.bgImageInput.click();

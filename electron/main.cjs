@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const { initConfigStore, loadConfig, saveConfig } = require("./configStore.cjs");
 const { notifyCountdownFinished } = require("./notificationService.cjs");
+const { createTray, destroyTray } = require("./trayService.cjs");
 
 // ── 悬浮窗状态缓存（主进程做中转）────────────────────────────────────────────
 // 由主面板在"开启悬浮模式"前写入，悬浮窗启动后读取
@@ -24,8 +25,76 @@ let floatingWindow = null;
 function notifyFloatingClosed() {
   if (mainWindow && mainWindow.webContents) {
     mainWindow.webContents.send("floating-action", "close");
-    mainWindow.show();
+    showMainWindow();
   }
+}
+
+function syncDockVisibility() {
+  if (process.platform !== "darwin" || !app.dock) return;
+
+  const shouldShowDock = !!(
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.isVisible()
+  );
+
+  if (!shouldShowDock) {
+    app.dock.hide();
+    return;
+  }
+
+  app.dock.show();
+}
+
+function showMainWindow() {
+  if (!mainWindow) {
+    createMainWindow();
+    return;
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function toggleMainWindow() {
+  if (!mainWindow) {
+    createMainWindow();
+    return;
+  }
+
+  if (mainWindow.isVisible()) {
+    mainWindow.hide();
+    return;
+  }
+
+  showMainWindow();
+}
+
+function showFloatingWindowFromTray() {
+  if (floatingWindow) {
+    floatingWindow.show();
+    return;
+  }
+
+  createFloatingWindow();
+}
+
+function quitAppFromTray() {
+  app.isQuitting = true;
+  app.quit();
+}
+
+function initMenuBarApp() {
+  createTray({
+    showMainWindow,
+    toggleMainWindow,
+    showFloatingWindow: showFloatingWindowFromTray,
+    quitApp: quitAppFromTray,
+  });
+  syncDockVisibility();
 }
 
 // ── 创建主窗口 ────────────────────────────────────────────────────────────────
@@ -54,7 +123,21 @@ function createMainWindow() {
 
   mainWindow.on("closed", () => {
     mainWindow = null;
+    syncDockVisibility();
   });
+
+  // macOS 下点击红色关闭按钮时不退出应用，只隐藏到菜单栏中。
+  mainWindow.on("close", (event) => {
+    if (process.platform !== "darwin" || app.isQuitting) return;
+    event.preventDefault();
+    mainWindow.hide();
+  });
+
+  // 主窗口显示时恢复 Dock，隐藏时只保留菜单栏入口。
+  mainWindow.on("show", syncDockVisibility);
+  mainWindow.on("hide", syncDockVisibility);
+  mainWindow.on("minimize", syncDockVisibility);
+  mainWindow.on("restore", syncDockVisibility);
 }
 
 // ── 创建悬浮窗 ────────────────────────────────────────────────────────────────
@@ -243,6 +326,7 @@ ipcMain.handle("notify-countdown-finished", (_event, payload = {}) => {
 app.whenReady().then(async () => {
   // 先初始化配置存储，再创建窗口，保证窗口启动时就能读取到稳定配置。
   await initConfigStore();
+  initMenuBarApp();
   createMainWindow();
 
   app.on("activate", () => {
@@ -254,6 +338,7 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
+    destroyTray();
     app.quit();
   }
 });
