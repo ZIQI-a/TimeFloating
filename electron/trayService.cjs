@@ -1,17 +1,12 @@
 const path = require("path");
-const { Menu, Tray, nativeImage } = require("electron");
+const { Menu, Tray } = require("electron");
 
 // 菜单栏模式由主进程统一维护，避免渲染层直接控制应用生命周期。
 let tray = null;
 
 function getTrayImage() {
-  const iconPath = path.join(__dirname, "../public/trayTemplate.png");
-  const image = nativeImage.createFromPath(iconPath).resize({
-    width: 42,
-    height: 42,
-  });
-  image.setTemplateImage(true);
-  return image;
+  // 使用标准 Template 素材路径，让 macOS 按原生菜单栏图标规则布局。
+  return path.join(__dirname, "../public/trayTemplate.png");
 }
 
 function buildTrayMenu(handlers) {
